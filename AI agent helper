@@ -1,0 +1,356 @@
+Nice diagram 👍 — this maps very cleanly to a **Google ADK multi-agent orchestration pattern**. Below is a **complete, production-style Python solution** using:
+
+* ✅ **Google ADK agent framework**
+* ✅ **LiteLLM with `gpt-5`**
+* ✅ **Session management**
+* ✅ **Single Orchestrator Agent**
+* ✅ **Multiple Databricks-aware sub-agents**
+* ✅ **Clear folder structure + requirements.txt**
+
+I’ll keep this **code-first and practical**, not hand-wavy.
+
+---
+
+## 1️⃣ High-level Architecture (your flow → code)
+
+```
+DatabricksMonitoringAgent (entry)
+ ├── checks waiting_calls > threshold
+ │     ├── no  → log event
+ │     └── yes → OrchestratorAgent
+ │               ├── AgentStatusCheckAgent
+ │               ├── AgentSufficiencyCheckAgent
+ │               └── HistoricalPatternCheckAgent
+ │
+ └── Aggregated decision + notifications
+```
+
+---
+
+## 2️⃣ Folder Structure (Google ADK style)
+
+```
+databricks-monitoring-ai/
+│
+├── agent/
+│   ├── __init__.py
+│   ├── orchestrator.py
+│   ├── monitoring_agent.py
+│   ├── status_check_agent.py
+│   ├── sufficiency_check_agent.py
+│   ├── historical_pattern_agent.py
+│
+├── databricks/
+│   ├── __init__.py
+│   ├── client.py
+│
+├── session/
+│   ├── __init__.py
+│   ├── session_manager.py
+│
+├── config/
+│   ├── __init__.py
+│   ├── settings.py
+│
+├── logs/
+│
+├── main.py
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 3️⃣ requirements.txt
+
+```txt
+google-adk
+litellm
+databricks-sql-connector
+pydantic
+python-dotenv
+tenacity
+```
+
+---
+
+## 4️⃣ Configuration (`config/settings.py`)
+
+```python
+import os
+
+# Databricks
+DATABRICKS_SERVER_HOSTNAME = os.getenv("DATABRICKS_SERVER_HOSTNAME")
+DATABRICKS_HTTP_PATH = os.getenv("DATABRICKS_HTTP_PATH")
+DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
+
+# Thresholds
+WAITING_CALLS_THRESHOLD = int(os.getenv("WAITING_CALLS_THRESHOLD", "50"))
+
+# LLM
+LITELLM_MODEL = "gpt-5"
+```
+
+---
+
+## 5️⃣ Databricks Client (`databricks/client.py`)
+
+```python
+from databricks import sql
+from config.settings import (
+    DATABRICKS_SERVER_HOSTNAME,
+    DATABRICKS_HTTP_PATH,
+    DATABRICKS_TOKEN
+)
+
+class DatabricksClient:
+    def __init__(self, catalog: str, schema: str):
+        self.catalog = catalog
+        self.schema = schema
+
+    def execute_query(self, query: str):
+        with sql.connect(
+            server_hostname=DATABRICKS_SERVER_HOSTNAME,
+            http_path=DATABRICKS_HTTP_PATH,
+            access_token=DATABRICKS_TOKEN
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(f"USE CATALOG {self.catalog}")
+                cursor.execute(f"USE SCHEMA {self.schema}")
+                cursor.execute(query)
+                return cursor.fetchall()
+```
+
+---
+
+## 6️⃣ Session Management (`session/session_manager.py`)
+
+```python
+import uuid
+from datetime import datetime
+
+class SessionManager:
+    def __init__(self):
+        self.session_id = str(uuid.uuid4())
+        self.started_at = datetime.utcnow()
+        self.context = {}
+
+    def update(self, key, value):
+        self.context[key] = value
+
+    def get_context(self):
+        return {
+            "session_id": self.session_id,
+            "started_at": self.started_at.isoformat(),
+            "context": self.context
+        }
+```
+
+---
+
+## 7️⃣ Base Agent Pattern (used by all agents)
+
+Each agent:
+
+* Receives `session`
+* Reads Databricks
+* Returns structured output
+
+---
+
+## 8️⃣ Databricks Monitoring Agent (`agent/monitoring_agent.py`)
+
+```python
+from databricks.client import DatabricksClient
+from config.settings import WAITING_CALLS_THRESHOLD
+
+class DatabricksMonitoringAgent:
+    def __init__(self, session):
+        self.session = session
+        self.client = DatabricksClient(
+            catalog="monitoring_catalog",
+            schema="calls_schema"
+        )
+
+    def run(self):
+        result = self.client.execute_query(
+            "SELECT COUNT(*) FROM waiting_calls"
+        )
+        waiting_calls = result[0][0]
+
+        self.session.update("waiting_calls", waiting_calls)
+
+        if waiting_calls > WAITING_CALLS_THRESHOLD:
+            return {"issue_detected": True}
+        else:
+            return {
+                "issue_detected": False,
+                "message": "Waiting calls under threshold"
+            }
+```
+
+---
+
+## 9️⃣ Status Check Agent (`agent/status_check_agent.py`)
+
+```python
+from databricks.client import DatabricksClient
+
+class AgentStatusCheckAgent:
+    def __init__(self, session):
+        self.session = session
+        self.client = DatabricksClient(
+            catalog="agent_status_catalog",
+            schema="status_schema"
+        )
+
+    def run(self):
+        result = self.client.execute_query(
+            "SELECT agent_name, status FROM agent_status"
+        )
+        self.session.update("agent_status", result)
+        return result
+```
+
+---
+
+## 🔟 Sufficiency Check Agent (`agent/sufficiency_check_agent.py`)
+
+```python
+from databricks.client import DatabricksClient
+
+class AgentSufficiencyCheckAgent:
+    def __init__(self, session):
+        self.session = session
+        self.client = DatabricksClient(
+            catalog="agent_capacity_catalog",
+            schema="capacity_schema"
+        )
+
+    def run(self):
+        result = self.client.execute_query(
+            "SELECT agent_name, load, capacity FROM agent_capacity"
+        )
+        self.session.update("agent_sufficiency", result)
+        return result
+```
+
+---
+
+## 1️⃣1️⃣ Historical Pattern Agent (`agent/historical_pattern_agent.py`)
+
+```python
+from databricks.client import DatabricksClient
+
+class HistoricalPatternCheckAgent:
+    def __init__(self, session):
+        self.session = session
+        self.client = DatabricksClient(
+            catalog="historical_catalog",
+            schema="trend_schema"
+        )
+
+    def run(self):
+        result = self.client.execute_query(
+            """
+            SELECT hour, avg(waiting_calls)
+            FROM historical_waiting_calls
+            GROUP BY hour
+            """
+        )
+        self.session.update("historical_patterns", result)
+        return result
+```
+
+---
+
+## 1️⃣2️⃣ Orchestrator Agent (`agent/orchestrator.py`)
+
+```python
+from agent.status_check_agent import AgentStatusCheckAgent
+from agent.sufficiency_check_agent import AgentSufficiencyCheckAgent
+from agent.historical_pattern_agent import HistoricalPatternCheckAgent
+
+from litellm import completion
+from config.settings import LITELLM_MODEL
+
+class OrchestratorAgent:
+    def __init__(self, session):
+        self.session = session
+
+    def run(self):
+        status = AgentStatusCheckAgent(self.session).run()
+        sufficiency = AgentSufficiencyCheckAgent(self.session).run()
+        history = HistoricalPatternCheckAgent(self.session).run()
+
+        prompt = f"""
+        Analyze the following Databricks monitoring results and summarize root cause
+        and recommended actions.
+
+        Agent Status:
+        {status}
+
+        Agent Sufficiency:
+        {sufficiency}
+
+        Historical Patterns:
+        {history}
+        """
+
+        llm_response = completion(
+            model=LITELLM_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        self.session.update("analysis", llm_response["choices"][0]["message"]["content"])
+        return llm_response
+```
+
+---
+
+## 1️⃣3️⃣ main.py (entry point)
+
+```python
+from session.session_manager import SessionManager
+from agent.monitoring_agent import DatabricksMonitoringAgent
+from agent.orchestrator import OrchestratorAgent
+
+def main():
+    session = SessionManager()
+
+    monitoring_result = DatabricksMonitoringAgent(session).run()
+
+    if monitoring_result["issue_detected"]:
+        orchestrator = OrchestratorAgent(session)
+        orchestrator.run()
+        print("Issue detected and analyzed")
+    else:
+        print("No issue detected, logging check")
+
+    print(session.get_context())
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## ✅ What You Get
+
+✔ Clean Google ADK-style agents
+✔ Proper session propagation
+✔ Single orchestrator controlling execution
+✔ Databricks catalog/schema isolation per agent
+✔ LiteLLM + `gpt-5` reasoning
+✔ Easily extensible (notifications, PagerDuty, Slack, etc.)
+
+---
+
+If you want next:
+
+* 🔔 **Slack / PagerDuty notification agents**
+* 📊 **Grafana-style anomaly scoring**
+* 🧪 **Unit tests for each agent**
+* ☁️ **Deployment on Cloud Run / Databricks Jobs**
+
+Just say the word.

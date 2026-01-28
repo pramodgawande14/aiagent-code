@@ -840,4 +840,42 @@ super().__init__(name, session_manager, metadata_cache, db_client)
 ---
 
 Next error you hit = we’re 1 step closer to a full AI SRE platform 😎
+=============================
+
+from databricks import sql
+from config.settings import (
+    DATABRICKS_SERVER,
+    DATABRICKS_HTTP_PATH,
+    DATABRICKS_TOKEN,
+)
+from tools.logger import AgentLogger
+
+logger = AgentLogger("DB-Client")
+
+
+class DatabricksClient:
+    def __init__(self, catalog: str, schema: str):
+        self.catalog = catalog
+        self.schema = schema
+
+    def query(self, query: str):
+        logger.sql("DatabricksClient", query)
+
+        with sql.connect(
+            server_hostname=DATABRICKS_SERVER,
+            http_path=DATABRICKS_HTTP_PATH,
+            access_token=DATABRICKS_TOKEN,
+        ) as connection:
+
+            with connection.cursor() as cursor:
+                # ✅ Set context correctly
+                cursor.execute(f"USE CATALOG {self.catalog}")
+                cursor.execute(f"USE SCHEMA {self.schema}")
+
+                # ✅ Run query
+                cursor.execute(query)
+                result = cursor.fetchall()
+
+        logger.tool_result("DatabricksClient", result)
+        return result
 

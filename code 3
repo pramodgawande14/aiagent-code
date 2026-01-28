@@ -565,3 +565,133 @@ If you want next level, I can add:
 * Auto-remediation actions
 
 You’re basically building an **AI SRE team** now 😄
+
+==============================================
+Nice, adding proper logging makes this feel like a real production system 👍
+We’ll build a **central structured logger** that:
+
+* Logs agent actions
+* Logs SQL queries
+* Logs tool calls
+* Logs errors
+* Can later plug into ELK / Datadog / Splunk
+
+---
+
+# 📁 `tools/logger.py`
+
+```python
+import logging
+import sys
+from datetime import datetime
+
+
+class AgentLogger:
+    def __init__(self, name: str):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.INFO)
+
+        if not self.logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+
+            formatter = logging.Formatter(
+                fmt="%(asctime)s | %(levelname)s | %(agent)s | %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
+    def _log(self, level, message, agent_name, extra=None):
+        log_data = {
+            "agent": agent_name,
+            "extra": extra or {}
+        }
+        self.logger.log(level, message, extra=log_data)
+
+    # 🔹 General events
+    def info(self, agent_name, message, extra=None):
+        self._log(logging.INFO, message, agent_name, extra)
+
+    def warning(self, agent_name, message, extra=None):
+        self._log(logging.WARNING, message, agent_name, extra)
+
+    def error(self, agent_name, message, extra=None):
+        self._log(logging.ERROR, message, agent_name, extra)
+
+    # 🔹 SQL logging
+    def sql(self, agent_name, query):
+        self._log(logging.INFO, f"SQL Executed: {query}", agent_name)
+
+    # 🔹 LLM calls
+    def llm_call(self, agent_name, prompt_preview):
+        preview = prompt_preview[:200].replace("\n", " ")
+        self._log(logging.INFO, f"LLM Call: {preview}", agent_name)
+
+    # 🔹 Tool output
+    def tool_result(self, agent_name, result):
+        preview = str(result)[:300]
+        self._log(logging.INFO, f"Tool Result: {preview}", agent_name)
+```
+
+---
+
+# 🧠 Example Usage Inside an Agent
+
+### In `base_agent.py`
+
+```python
+from tools.logger import AgentLogger
+
+logger = AgentLogger("AI-Ops")
+
+class BaseAgent:
+    ...
+
+    def run_agent_loop(self, session_id, system_prompt, user_context):
+        logger.info(self.name, "Agent execution started")
+
+        logger.llm_call(self.name, system_prompt + user_context)
+
+        response = completion(model=LLM_MODEL, messages=messages)
+        content = response["choices"][0]["message"]["content"]
+
+        if "sql" in content:
+            sql_query = json.loads(content)["sql"]
+            logger.sql(self.name, sql_query)
+
+            data = self.db.query(sql_query)
+            logger.tool_result(self.name, data)
+```
+
+---
+
+# 🖨 Example Log Output
+
+```
+2026-01-28 10:21:04 | INFO | AgentStatusAgent | Agent execution started
+2026-01-28 10:21:05 | INFO | AgentStatusAgent | LLM Call: You are an Agent Status Analysis AI...
+2026-01-28 10:21:06 | INFO | AgentStatusAgent | SQL Executed: SELECT * FROM agent_status WHERE ...
+2026-01-28 10:21:07 | INFO | AgentStatusAgent | Tool Result: [('agent-1','healthy'), ('agent-2','failed')]
+```
+
+---
+
+# 🚀 Why this design is strong
+
+✔ Structured logs
+✔ Agent-aware
+✔ Debuggable LLM calls
+✔ Tracks SQL cost sources
+✔ Ready for observability pipelines
+
+---
+
+If you want, next we can add:
+
+* JSON logs mode
+* Trace IDs per incident
+* Latency tracking per agent
+* Query cost tracking
+
+This is turning into enterprise-grade AI Ops 🔥
+

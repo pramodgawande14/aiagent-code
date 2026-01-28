@@ -1,6 +1,6 @@
 generate python code with google adk code base structure. Build AI agents for below flow chart. use session management, litellm gpt-5 model, create orchestrator agent to manage execution. create requirements.txt for packages. create folder structure diagram as well. Databricks Monitoring Agent : the read the data from data bricks and get the calls waiting count. Compare with calls waiting count with configured threshold. If it more than threshold start analysis if not just log the check event. Agent Status Check Agent : connect with data bricks same server but different catalog and schema are different. Get the agent status analysis. Agent Sufficiency Check Agent : connect with data bricks same server but different catalog and schema are different. Get the agent sufficiency status analysis. Historical Pattern Check Agent : connect with data bricks same server but different catalog and schema are different. Get the historical analysis. database schema, tables description related metadata should be collected and maintained into cache in advance.
 
-
+agent_status_agent.py, agent_sufficiency_agent.py, historical_pattern_agent.py should work on system prompt not the direct sql query, agent should read the prompt build the related sql queries and get databricks client output process the result according to prompt and give response
 
 Love this kind of system design — this is a **real multi-agent ops brain** 🧠⚙️
 Let’s build it cleanly using **Google ADK style structure + LiteLLM (gpt-5) + session management + metadata cache**.
